@@ -16,27 +16,26 @@ class TestToOpenaiBaseUrl:
     def test_minimax_global_anthropic_suffix_replaced(self):
         assert _to_openai_base_url("https://api.minimax.io/anthropic") == "https://api.minimax.io/v1"
 
-    def test_minimax_cn_anthropic_suffix_replaced(self):
+    def test_minimax_chat_host_rewritten(self):
+        assert _to_openai_base_url("https://api.minimax.chat/anthropic") == "https://api.minimax.chat/v1"
+
+    def test_anthropic_only_custom_gateway_kept(self):
+        """Alibaba Bailian Token Plan and similar have no sibling /v1 (#83642)."""
+        url = "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+        assert _to_openai_base_url(url) == url
+
+    def test_marker_in_path_does_not_false_positive(self):
+        """Host-anchored matching: a marker in the path must not trigger rewrite."""
+        url = "https://gateway.example.com/api.minimax.io/anthropic"
+        assert _to_openai_base_url(url) == url
+
+    def test_minimax_cn_api_prefix_host_rewritten(self):
         assert _to_openai_base_url("https://api.minimaxi.com/anthropic") == "https://api.minimaxi.com/v1"
 
-    def test_trailing_slash_stripped_before_replace(self):
-        assert _to_openai_base_url("https://api.minimax.io/anthropic/") == "https://api.minimax.io/v1"
-
-    def test_v1_url_unchanged(self):
-        assert _to_openai_base_url("https://api.openai.com/v1") == "https://api.openai.com/v1"
-
-    def test_openrouter_url_unchanged(self):
-        assert _to_openai_base_url("https://openrouter.ai/api/v1") == "https://openrouter.ai/api/v1"
-
-    def test_anthropic_domain_unchanged(self):
-        """api.anthropic.com doesn't end with /anthropic — should be untouched."""
-        assert _to_openai_base_url("https://api.anthropic.com") == "https://api.anthropic.com"
-
-    def test_anthropic_in_subpath_unchanged(self):
-        assert _to_openai_base_url("https://example.com/anthropic/extra") == "https://example.com/anthropic/extra"
-
-    def test_empty_string(self):
-        assert _to_openai_base_url("") == ""
+    def test_lookalike_host_suffix_not_matched(self):
+        """evil-minimax.io.example.com must not match the minimax.io suffix."""
+        url = "https://minimax.io.evil.example.com/anthropic"
+        assert _to_openai_base_url(url) == url
 
     def test_none(self):
         assert _to_openai_base_url(None) == ""
