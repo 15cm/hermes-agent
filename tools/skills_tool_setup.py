@@ -80,41 +80,46 @@ def _get_required_environment_variables(frontmatter: Dict[str, Any]) -> List[Dic
     return list(required.values())
 
 
-def _capture_result(missing_names, setup_skipped=False, gateway_setup_hint=None):
-    return {"missing_names": missing_names, "setup_skipped": setup_skipped, "gateway_setup_hint": gateway_setup_hint}
+def _capture_result(missing_names, setup_skipped=False, gateway_setup_hint=None, **outcome):
+    result = {"missing_names": missing_names, "setup_skipped": setup_skipped,
+              "gateway_setup_hint": gateway_setup_hint}
+    result.update({k: v for k, v in outcome.items() if v is not None})
+    return result
 
 
 def _capture_required_environment_variables(
     skill_name: str, missing_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Prompt for missing secrets via the registered capture callback (if any)."""
-    from tools import skills_tool as _st
+    """Use secure callback on interactive surfaces; Matrix uses ordinary chat."""
     if not missing_entries:
         return _capture_result([])
     missing_names = [entry["name"] for entry in missing_entries]
-    # Messaging-platform gateway surfaces can't prompt for a secret, so they get the "unsupported"
-    # hint. Interactive gateway surfaces (desktop app / TUI) set HERMES_INTERACTIVE (same flag
-    # tools/approval.py uses) and register a callback routing to a secure secret.request overlay.
-    if _is_gateway_surface() and not env_var_enabled("HERMES_INTERACTIVE"):
-        try:
-            from gateway.platforms.base import GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE as hint
-        except Exception:
-            hint = (f"Secure secret entry is not available. Load this skill in the local CLI to be "
-                    f"prompted, or add the key to {display_hermes_home()}/.env manually.")
-        return _capture_result(missing_names, gateway_setup_hint=hint)
-    if (callback := _st._secret_capture_callback) is None:
-        return _capture_result(missing_names)
+    from tools import skills_tool as _st
+    callback = _st.get_secret_capture_callback()
+    if callback is None or _is_gateway_surface():
+        return _capture_result(
+            missing_names,
+            setup_skipped=False,
+            gateway_setup_hint=(
+                "Send the value in ordinary Matrix chat when asked; it may appear in Matrix history, "
+                "Hermes logs, session history, model context, and other configured records."
+            ) if _is_gateway_surface() and _get_gateway_platform() == "matrix" else None,
+            capture_supported=False,
+            capture_outcome="ordinary_chat" if _is_gateway_surface() and _get_gateway_platform() == "matrix" else "unavailable",
+        )
     remaining_names: List[str] = []
     for entry in missing_entries:
         metadata = {"skill_name": skill_name, **{k: entry[k] for k in ("help", "required_for") if entry.get(k)}}
         try:
             callback_result = callback(entry["name"], entry["prompt"], metadata)
         except Exception:
-            logger.warning(f"Secret capture callback failed for {entry['name']}", exc_info=True)
-            callback_result = {"success": False, "stored_as": entry["name"], "validated": False, "skipped": True}
-        ok = isinstance(callback_result, dict) and callback_result.get("success")
-        if not (ok and not callback_result.get("skipped")):
+            logger.warning("Secret capture callback failed for %s", entry["name"], exc_info=True)
+            callback_result = {"success": False, "skipped": True}
+        if not (isinstance(callback_result, dict) and callback_result.get("success") and not callback_result.get("skipped")):
             remaining_names.append(entry["name"])
-    return _capture_result(remaining_names, bool(remaining_names))
+    return _capture_result(remaining_names, bool(remaining_names),
+                           gateway_setup_hint=None if not remaining_names else
+                           "Secure local prompt was attempted; no value was returned to the model.",
+                           capture_supported=True, capture_outcome="stored" if not remaining_names else "failed")
 
 
 def _is_gateway_surface() -> bool:
@@ -122,6 +127,11 @@ def _is_gateway_surface() -> bool:
         return True
     from gateway.session_context import get_session_env
     return bool(get_session_env("HERMES_SESSION_PLATFORM"))
+
+
+def _get_gateway_platform() -> str:
+    from gateway.session_context import get_session_env
+    return str(get_session_env("HERMES_SESSION_PLATFORM", "") or "").strip().lower()
 
 
 def _is_env_var_persisted(var_name: str, env_snapshot: Dict[str, str]) -> bool:

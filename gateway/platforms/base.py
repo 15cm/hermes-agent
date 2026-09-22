@@ -439,9 +439,6 @@ def streaming_tts_should_skip_whole_file(completed_turns: set[str], session_key:
     return bool(turn_key and turn_key in completed_turns)
 
 
-GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE = (
-    "Secure secret entry is not supported over messaging. "
-    "Load this skill in the local CLI to be prompted, or add the key to ~/.hermes/.env manually.")
 
 # One sentence for every "you may not press/run this" refusal on every platform (slash commands,
 # approval buttons, pickers, prompts). ``{platform}`` is the ``Platform.value`` for the

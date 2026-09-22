@@ -10,7 +10,7 @@ import pytest
 
 from gateway.platforms.base import (
     BasePlatformAdapter,
-    GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE,
+
     SendResult,
     cache_audio_from_bytes,
     cache_image_from_bytes,
@@ -58,12 +58,6 @@ class TestInboundMediaSizeCap:
         with pytest.raises(ValueError, match="Inbound image payload is too large"):
             cache_image_from_bytes(self._PNG, ext=".png")
 
-
-class TestSecretCaptureGuidance:
-    def test_gateway_secret_capture_message_points_to_local_setup(self):
-        message = GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE
-        assert "local cli" in message.lower()
-        assert "~/.hermes/.env" in message
 
 
 class TestSafeUrlForLog:

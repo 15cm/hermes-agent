@@ -179,7 +179,9 @@ def save_provider_env_credential(env_var: str, value: str) -> Dict[str, Any]:
     from hermes_cli.config import load_env, save_env_value
 
     old_value = load_env().get(env_var)
-    save_env_value(env_var, value)
+    saved = save_env_value(env_var, value)
+    if saved is False:
+        raise PermissionError(f"credential was not stored: {env_var}")
 
     config_updates: List[str] = []
     if value and old_value and old_value != value:

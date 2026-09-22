@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 from agent.secret_scope import get_secret
+from hermes_constants import get_hermes_home
 from gateway.platforms._shared import (
     apply_yaml_bridge as _apply_yaml_bridge, extra_or_secret as _extra_or_secret,
     get_scoped_secret as _get_scoped_secret, send_error
@@ -850,6 +851,7 @@ class MatrixAdapter(BasePlatformAdapter):
         self._client: Any = None  # mautrix.client.Client
         self._crypto_db: Any = None  # mautrix.util.async_db.Database
         self._store_dir: Optional[Path] = None  # pinned per profile in connect()
+
         self._sync_task: Optional[asyncio.Task] = None
         self._invite_join_tasks: Dict[str, asyncio.Task] = {}
         self._closing = False
@@ -1364,31 +1366,22 @@ class MatrixAdapter(BasePlatformAdapter):
 
     async def disconnect(self) -> None:
         self._closing = True
+
         if self._sync_task and not self._sync_task.done():
             self._sync_task.cancel()
             try:
                 await self._sync_task
             except (asyncio.CancelledError, Exception):
                 pass
+
+    def set_owner_profile(self, profile_name: str | None) -> None:
+        """Bind adapter ownership before inbound events."""
         for tasks in (self._invite_join_tasks.values(), self._reaction_redaction_tasks):
             pending = list(tasks)
             for task in pending:
                 if not task.done():
                     task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-        self._invite_join_tasks.clear()
-        self._reaction_redaction_tasks.clear()
-        if getattr(self, "_crypto_db", None):
-            try:
-                await self._crypto_db.stop()
-            except Exception as exc:
-                logger.debug("Matrix: could not close crypto DB on disconnect: %s", exc)
-        if self._client:
-            with suppress(Exception):
-                await self._client.api.session.close()
-            self._client = None
-        logger.info("Matrix: disconnected")
+            # Do not await cancelled tasks during synchronous ownership setup.
 
     async def send(
         self, chat_id: str, content: str, reply_to: Optional[str] = None,
@@ -1978,28 +1971,6 @@ class MatrixAdapter(BasePlatformAdapter):
             "Matrix: callback fired — event %s from %s in %s", getattr(event, "event_id", "?"), sender, room_id)
         if self._is_self_sender(sender):
             return
-        # Bridge/system identities must never reach the pairing flow (echo loop once paired).
-        # Ignore own messages (case-insensitive; also drops when our own user_id hasn't been resolved yet —
-        # see _is_self_sender docstring and issue #15763).
-        # Once a bridge user is paired, every outbound message it relays would loop back as an authorized
-        # user message (the "hall of mirrors" in #15763).
-        if self._is_system_or_bridge_sender(sender):
-            logger.debug("Matrix: ignoring system/bridge sender %s in %s", sender, room_id)
-            return
-        if any(pattern.search(sender or "") for pattern in self._ignored_user_patterns):
-            logger.debug("Matrix: ignoring sender %s in %s due to configured ignore pattern", sender, room_id)
-            return
-        if not await self._is_allowed_matrix_room_event(room_id):
-            logger.info("Matrix: ignoring message from unauthorized room %s", room_id)
-            return
-        event_id = str(getattr(event, "event_id", ""))
-        if self._is_duplicate_event(event_id):
-            return
-        # Startup grace: ignore old messages replayed by the initial sync.
-        event_ts = _matrix_event_timestamp_seconds(event)
-        if event_ts and event_ts < self._startup_ts - _STARTUP_GRACE_SECONDS:
-            self._note_late_grace_drop(event_ts)
-            return
         content = getattr(event, "content", None)
         if content is None:
             return
@@ -2009,7 +1980,27 @@ class MatrixAdapter(BasePlatformAdapter):
             source_content = content.serialize() if hasattr(content, "serialize") else {}
             msgtype = str(content.msgtype) if hasattr(content, "msgtype") else ""
         relates_to = source_content.get("m.relates_to", {})
+        event_id = str(getattr(event, "event_id", ""))
+        event_ts = _matrix_event_timestamp_seconds(event)
+
+        # Bridge/system identities must never reach the normal pairing flow (echo loop once paired).
+
+        if self._is_system_or_bridge_sender(sender):
+            logger.debug("Matrix: ignoring system/bridge sender %s in %s", sender, room_id)
+            return
         if relates_to.get("rel_type") == "m.replace":  # skip edits
+            return
+        if any(pattern.search(sender or "") for pattern in self._ignored_user_patterns):
+            logger.debug("Matrix: ignoring sender %s in %s due to configured ignore pattern", sender, room_id)
+            return
+        if not await self._is_allowed_matrix_room_event(room_id):
+            logger.info("Matrix: ignoring message from unauthorized room %s", room_id)
+            return
+        if self._is_duplicate_event(event_id):
+            return
+        # Startup grace: ignore old messages replayed by the initial sync.
+        if event_ts and event_ts < self._startup_ts - _STARTUP_GRACE_SECONDS:
+            self._note_late_grace_drop(event_ts)
             return
         # m.notice is the conventional bot-response msgtype; ignoring it prevents bot-to-bot loops.
         if msgtype == "m.notice" and not self._process_notices:
@@ -2134,8 +2125,13 @@ class MatrixAdapter(BasePlatformAdapter):
         body = source_content.get("body", "") or ""
         if not body:
             return
-        msg_event = await self._build_inbound_event(
-            room_id, sender, event_id, _normalize_matrix_bang_command(body), source_content, relates_to)
+        normalized = _normalize_matrix_bang_command(body)
+        await self._build_and_dispatch_text(room_id, sender, event_id, normalized, source_content, relates_to)
+
+    async def _build_and_dispatch_text(
+        self, room_id: str, sender: str, event_id: str, body: str, source_content: dict, relates_to: dict,
+    ) -> None:
+        msg_event = await self._build_inbound_event(room_id, sender, event_id, body, source_content, relates_to)
         if msg_event is None:
             return
         if msg_event.message_type == MessageType.TEXT and self._text_batch_delay_seconds > 0:
