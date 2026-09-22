@@ -46,6 +46,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 from agent.secret_scope import get_secret
+from hermes_constants import get_hermes_home
 from gateway.platforms._shared import (
     apply_yaml_bridge as _apply_yaml_bridge, extra_or_secret as _extra_or_secret,
     get_scoped_secret as _get_scoped_secret, send_error
@@ -850,6 +851,8 @@ class MatrixAdapter(BasePlatformAdapter):
         self._client: Any = None  # mautrix.client.Client
         self._crypto_db: Any = None  # mautrix.util.async_db.Database
         self._store_dir: Optional[Path] = None  # pinned per profile in connect()
+        # Capture routing is updated by multiplex startup after adapter ownership is known.
+        self._capture_home = str(get_hermes_home())
         self._sync_task: Optional[asyncio.Task] = None
         self._invite_join_tasks: Dict[str, asyncio.Task] = {}
         self._closing = False
@@ -1364,31 +1367,25 @@ class MatrixAdapter(BasePlatformAdapter):
 
     async def disconnect(self) -> None:
         self._closing = True
+        from tools import secret_gateway
+        secret_gateway.cancel_for_home(self._capture_home, "adapter_shutdown")
         if self._sync_task and not self._sync_task.done():
             self._sync_task.cancel()
             try:
                 await self._sync_task
             except (asyncio.CancelledError, Exception):
                 pass
+
+    def set_owner_profile(self, profile_name: str | None) -> None:
+        """Bind capture routing to adapter owner profile before inbound events."""
+        from hermes_cli.profiles import get_profile_dir
+        self._capture_home = str(get_profile_dir(profile_name)) if profile_name and profile_name != "default" else str(get_hermes_home())
         for tasks in (self._invite_join_tasks.values(), self._reaction_redaction_tasks):
             pending = list(tasks)
             for task in pending:
                 if not task.done():
                     task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-        self._invite_join_tasks.clear()
-        self._reaction_redaction_tasks.clear()
-        if getattr(self, "_crypto_db", None):
-            try:
-                await self._crypto_db.stop()
-            except Exception as exc:
-                logger.debug("Matrix: could not close crypto DB on disconnect: %s", exc)
-        if self._client:
-            with suppress(Exception):
-                await self._client.api.session.close()
-            self._client = None
-        logger.info("Matrix: disconnected")
+            # Do not await cancelled tasks during synchronous ownership setup.
 
     async def send(
         self, chat_id: str, content: str, reply_to: Optional[str] = None,
@@ -1978,28 +1975,6 @@ class MatrixAdapter(BasePlatformAdapter):
             "Matrix: callback fired — event %s from %s in %s", getattr(event, "event_id", "?"), sender, room_id)
         if self._is_self_sender(sender):
             return
-        # Bridge/system identities must never reach the pairing flow (echo loop once paired).
-        # Ignore own messages (case-insensitive; also drops when our own user_id hasn't been resolved yet —
-        # see _is_self_sender docstring and issue #15763).
-        # Once a bridge user is paired, every outbound message it relays would loop back as an authorized
-        # user message (the "hall of mirrors" in #15763).
-        if self._is_system_or_bridge_sender(sender):
-            logger.debug("Matrix: ignoring system/bridge sender %s in %s", sender, room_id)
-            return
-        if any(pattern.search(sender or "") for pattern in self._ignored_user_patterns):
-            logger.debug("Matrix: ignoring sender %s in %s due to configured ignore pattern", sender, room_id)
-            return
-        if not await self._is_allowed_matrix_room_event(room_id):
-            logger.info("Matrix: ignoring message from unauthorized room %s", room_id)
-            return
-        event_id = str(getattr(event, "event_id", ""))
-        if self._is_duplicate_event(event_id):
-            return
-        # Startup grace: ignore old messages replayed by the initial sync.
-        event_ts = _matrix_event_timestamp_seconds(event)
-        if event_ts and event_ts < self._startup_ts - _STARTUP_GRACE_SECONDS:
-            self._note_late_grace_drop(event_ts)
-            return
         content = getattr(event, "content", None)
         if content is None:
             return
@@ -2009,7 +1984,29 @@ class MatrixAdapter(BasePlatformAdapter):
             source_content = content.serialize() if hasattr(content, "serialize") else {}
             msgtype = str(content.msgtype) if hasattr(content, "msgtype") else ""
         relates_to = source_content.get("m.relates_to", {})
+        event_id = str(getattr(event, "event_id", ""))
+        event_ts = _matrix_event_timestamp_seconds(event)
+        if msgtype in ("m.text", "m.notice") and await self._try_secret_capture(
+                room_id, sender, event_id, source_content, relates_to):
+            return
+        # Bridge/system identities must never reach the normal pairing flow (echo loop once paired).
+        # Pending capture already consumed text above, intentionally before user/room policy.
+        if self._is_system_or_bridge_sender(sender):
+            logger.debug("Matrix: ignoring system/bridge sender %s in %s", sender, room_id)
+            return
         if relates_to.get("rel_type") == "m.replace":  # skip edits
+            return
+        if any(pattern.search(sender or "") for pattern in self._ignored_user_patterns):
+            logger.debug("Matrix: ignoring sender %s in %s due to configured ignore pattern", sender, room_id)
+            return
+        if not await self._is_allowed_matrix_room_event(room_id):
+            logger.info("Matrix: ignoring message from unauthorized room %s", room_id)
+            return
+        if self._is_duplicate_event(event_id):
+            return
+        # Startup grace: ignore old messages replayed by the initial sync.
+        if event_ts and event_ts < self._startup_ts - _STARTUP_GRACE_SECONDS:
+            self._note_late_grace_drop(event_ts)
             return
         # m.notice is the conventional bot-response msgtype; ignoring it prevents bot-to-bot loops.
         if msgtype == "m.notice" and not self._process_notices:
@@ -2134,26 +2131,35 @@ class MatrixAdapter(BasePlatformAdapter):
         body = source_content.get("body", "") or ""
         if not body:
             return
-        # Consume only an explicitly armed structured capture. This runs before context gating,
-        # batching, persistence, or model dispatch; ordinary chat remains ordinary chat.
-        from tools import secret_gateway
-        pending = secret_gateway.get_pending()
-        normalized = _normalize_matrix_bang_command(body)
-        if pending is not None and not relates_to.get("rel_type") == "m.replace":
-            if not body.strip() or len(body.encode("utf-8")) > 16384:
-                return
-            if normalized.startswith("/"):
-                return await self._build_and_dispatch_text(
-                    room_id, sender, event_id, normalized, source_content, relates_to)
-            # Redaction is best effort and never changes persistence outcome.
-            redacted = False
-            with suppress(Exception):
-                redacted = await self.redact_message(room_id, event_id, "secret capture")
-            result = await asyncio.to_thread(
-                secret_gateway.resolve_with_value, pending.capture_id, body, redacted=redacted)
-            logger.info("Matrix structured secret capture completed: success=%s", result.success)
+        if await self._try_secret_capture(room_id, sender, event_id, source_content, relates_to):
             return
+        normalized = _normalize_matrix_bang_command(body)
         await self._build_and_dispatch_text(room_id, sender, event_id, normalized, source_content, relates_to)
+
+    async def _try_secret_capture(
+        self, room_id: str, sender: str, event_id: str, source_content: dict, relates_to: dict,
+    ) -> bool:
+        """Consume pending text before Matrix policy, queueing, persistence, or model dispatch."""
+        body = source_content.get("body", "") or ""
+        from tools import secret_gateway
+        pending = secret_gateway.get_pending(self._capture_home)
+        if pending is None:
+            return False
+        if relates_to.get("rel_type") == "m.replace":
+            return True
+        redacted = False
+        with suppress(Exception):
+            redacted = await self.redact_message(room_id, event_id, "secret capture")
+        if not body:
+            secret_gateway.reject(pending.capture_id, "empty_value")
+            return True
+        if len(body.encode("utf-8")) > 16384:
+            secret_gateway.reject(pending.capture_id, "value_too_large")
+            return True
+        result = await asyncio.to_thread(
+            secret_gateway.resolve_with_value, pending.capture_id, body, redacted=redacted)
+        logger.info("Matrix structured secret capture completed: success=%s", result.success)
+        return True
 
     async def _build_and_dispatch_text(
         self, room_id: str, sender: str, event_id: str, body: str, source_content: dict, relates_to: dict,
