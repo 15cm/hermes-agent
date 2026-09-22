@@ -80,8 +80,11 @@ def _get_required_environment_variables(frontmatter: Dict[str, Any]) -> List[Dic
     return list(required.values())
 
 
-def _capture_result(missing_names, setup_skipped=False, gateway_setup_hint=None):
-    return {"missing_names": missing_names, "setup_skipped": setup_skipped, "gateway_setup_hint": gateway_setup_hint}
+def _capture_result(missing_names, setup_skipped=False, gateway_setup_hint=None, **outcome):
+    result = {"missing_names": missing_names, "setup_skipped": setup_skipped,
+              "gateway_setup_hint": gateway_setup_hint}
+    result.update({k: v for k, v in outcome.items() if v is not None})
+    return result
 
 
 def _capture_required_environment_variables(
@@ -93,20 +96,30 @@ def _capture_required_environment_variables(
     missing_names = [entry["name"] for entry in missing_entries]
     # Supported messaging gateways may register a transport-level secret
     # capture callback. Unsupported surfaces fall through to the existing hint.
-    if (callback := _st._secret_capture_callback) is None:
-        return _capture_result(missing_names)
+    callback = _st.get_secret_capture_callback()
+    if callback is None:
+        return _capture_result(missing_names, capture_supported=False, capture_outcome="unavailable")
     remaining_names: List[str] = []
+    attempted = False
+    stored = False
     for entry in missing_entries:
         metadata = {"skill_name": skill_name, **{k: entry[k] for k in ("help", "required_for") if entry.get(k)}}
         try:
+            attempted = True
             callback_result = callback(entry["name"], entry["prompt"], metadata)
         except Exception:
             logger.warning(f"Secret capture callback failed for {entry['name']}", exc_info=True)
             callback_result = {"success": False, "stored_as": entry["name"], "validated": False, "skipped": True}
         ok = isinstance(callback_result, dict) and callback_result.get("success")
+        stored = stored or bool(ok and not callback_result.get("skipped"))
         if not (ok and not callback_result.get("skipped")):
             remaining_names.append(entry["name"])
-    return _capture_result(remaining_names, bool(remaining_names))
+    return _capture_result(remaining_names, bool(remaining_names),
+                           gateway_setup_hint=None if not remaining_names else
+                           "Secure prompted capture was attempted; no secret value is exposed to the model.",
+                           capture_supported=True,
+                           capture_outcome="stored" if stored and not remaining_names else
+                           ("failed" if attempted else "unavailable"))
 
 
 def _is_gateway_surface() -> bool:

@@ -2134,8 +2134,31 @@ class MatrixAdapter(BasePlatformAdapter):
         body = source_content.get("body", "") or ""
         if not body:
             return
-        msg_event = await self._build_inbound_event(
-            room_id, sender, event_id, _normalize_matrix_bang_command(body), source_content, relates_to)
+        # Consume only an explicitly armed structured capture. This runs before context gating,
+        # batching, persistence, or model dispatch; ordinary chat remains ordinary chat.
+        from tools import secret_gateway
+        pending = secret_gateway.get_pending()
+        normalized = _normalize_matrix_bang_command(body)
+        if pending is not None and not relates_to.get("rel_type") == "m.replace":
+            if not body.strip() or len(body.encode("utf-8")) > 16384:
+                return
+            if normalized.startswith("/"):
+                return await self._build_and_dispatch_text(
+                    room_id, sender, event_id, normalized, source_content, relates_to)
+            # Redaction is best effort and never changes persistence outcome.
+            redacted = False
+            with suppress(Exception):
+                redacted = await self.redact_message(room_id, event_id, "secret capture")
+            result = await asyncio.to_thread(
+                secret_gateway.resolve_with_value, pending.capture_id, body, redacted=redacted)
+            logger.info("Matrix structured secret capture completed: success=%s", result.success)
+            return
+        await self._build_and_dispatch_text(room_id, sender, event_id, normalized, source_content, relates_to)
+
+    async def _build_and_dispatch_text(
+        self, room_id: str, sender: str, event_id: str, body: str, source_content: dict, relates_to: dict,
+    ) -> None:
+        msg_event = await self._build_inbound_event(room_id, sender, event_id, body, source_content, relates_to)
         if msg_event is None:
             return
         if msg_event.message_type == MessageType.TEXT and self._text_batch_delay_seconds > 0:

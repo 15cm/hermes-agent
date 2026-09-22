@@ -1287,6 +1287,9 @@ class TurnRunner:
             mem_notif = "on" if mem_notif else "off"
         agent.memory_notifications = str(mem_notif).lower() if mem_notif else "on"
         agent.clarify_callback = self._clarify_callback_sync
+        import tools.skills_tool as skills_tool
+        self._secret_capture_callback_token = skills_tool.bind_secret_capture_callback(
+            self._secret_capture_callback_sync)
         # Thinking between tool calls is independent of tool_progress mode (Mattermost opts in
         # per platform so global scratch-text doesn't leak into threads).
         agent.thinking_progress = ctx._thinking_enabled
@@ -1307,6 +1310,77 @@ class TurnRunner:
         # processes are outside this baseline and remain alive.
         agent._gateway_turn_process_task_id, agent._gateway_turn_process_baseline = ctx.process_task_id, ctx.process_baseline
         ctx.tools_holder[0] = getattr(agent, "tools", None)  # transcript logging
+
+    def _secret_capture_callback_sync(self, env_var: str, prompt: str, metadata=None) -> dict:
+        """Capture one structured skill secret through current delivery lane."""
+        from pathlib import Path
+        from hermes_constants import get_hermes_home
+        from tools import secret_gateway
+        from hermes_cli.config import save_env_value_secure
+
+        destination_home = get_hermes_home()
+
+        def persist(value: str, redacted: bool):
+            try:
+                from gateway.run import _profile_runtime_scope
+                with _profile_runtime_scope(Path(destination_home)):
+                    saved = save_env_value_secure(env_var, value)
+                    # The turn's outer profile scope was built before this write. Refresh its
+                    # mutable mapping in place so tools later in the same turn can resolve the
+                    # newly captured value without waiting for another turn.
+                    from agent.secret_scope import current_secret_scope
+                    active_secrets = current_secret_scope()
+                    if isinstance(active_secrets, dict):
+                        active_secrets[env_var] = value
+                    from tools.skills_tool import load_env
+                    verified = bool(load_env().get(env_var))
+                if not saved or saved.get("success") is False or not verified:
+                    return secret_gateway.SecretCaptureResult(False, env_var, error_code="persistence_failed")
+                return secret_gateway.SecretCaptureResult(True, env_var, validated=verified)
+            except Exception:
+                # Persistence exceptions may originate in credential backends; do not risk
+                # rendering secret-bearing exception text into gateway logs.
+                logger.warning("Structured secret persistence failed for %s", env_var, exc_info=False)
+                return secret_gateway.SecretCaptureResult(False, env_var, error_code="persistence_failed")
+
+        entry = secret_gateway.register(
+            env_var=env_var, prompt=prompt, skill_name=(metadata or {}).get("skill_name"),
+            destination_home=str(destination_home), handler=persist, notify=self._secret_capture_notify_sync)
+        if entry is None:
+            return {"success": False, "stored_as": env_var, "validated": False,
+                    "skipped": True, "error_code": "capture_busy"}
+        result = secret_gateway.wait(entry)
+        return {"success": result.success, "stored_as": result.stored_as,
+                "validated": result.validated, "skipped": result.skipped,
+                **({"error_code": result.error_code} if result.error_code else {})}
+
+    def _secret_capture_notify_sync(self, entry) -> bool:
+        ctx = self._ctx
+        adapter = ctx._status_adapter
+        if adapter is None or not ctx._status_chat_id:
+            return False
+        metadata = {**(ctx._status_thread_metadata or {}), "is_secret_prompt": True,
+                    "secret_capture_id": entry.capture_id}
+        try:
+            prompt = (
+                f"Reply with the {entry.prompt}. Gateway will consume this response before model dispatch, "
+                "store it in the active profile, and return metadata only. Do not include other text."
+            )
+            fut = self._schedule(adapter.send(ctx._status_chat_id, prompt, metadata=metadata),
+                                 "Secret capture prompt failed to schedule")
+            return bool(fut.result(timeout=15).success)
+        except Exception:
+            logger.warning("Secret capture prompt delivery failed", exc_info=True)
+            return False
+
+    def _reset_secret_capture_callback(self) -> None:
+        callback_token = getattr(self, "_secret_capture_callback_token", None)
+        if callback_token is None:
+            return
+        with suppress(Exception):
+            from tools.skills_tool import reset_secret_capture_callback
+            reset_secret_capture_callback(callback_token)
+        self._secret_capture_callback_token = None
 
     # ── blocking prompts from the agent thread (approval / clarify) ─────────────────────────
 
@@ -1732,6 +1806,7 @@ class TurnRunner:
                 from tools.clarify_gateway import clear_session
                 clear_session(session_key)
             reset_current_session_key(token)
+            self._reset_secret_capture_callback()
 
     def _finish_stream_consumer(self, result, agent_history, stream_consumer):
         ctx = self._ctx
@@ -1949,9 +2024,13 @@ class TurnRunner:
             # Reuse the in-agent one-shot notice so the pre-agent provider switch is user-visible too.
             agent._pending_fallback_notice = pending_fallback_notice
         self._wire_turn_agent_callbacks(agent, turn_route, reasoning_config, stream_delta_cb, interim_cb, want_interim)
-        agent_history, observed_group_context, history_media_paths = self._load_turn_history(agent, reused_cached_agent)
-        persist_msg, persist_ts = self._prepare_turn_message(agent_history)
-        result = self._run_conversation_with_approval(agent, agent_history, observed_group_context, persist_msg, persist_ts)
+        try:
+            agent_history, observed_group_context, history_media_paths = self._load_turn_history(agent, reused_cached_agent)
+            persist_msg, persist_ts = self._prepare_turn_message(agent_history)
+            result = self._run_conversation_with_approval(agent, agent_history, observed_group_context, persist_msg, persist_ts)
+        finally:
+            # Covers failures before the conversation helper's own cleanup path.
+            self._reset_secret_capture_callback()
         self._finish_stream_consumer(result, agent_history, stream_consumer)
         # The streaming-TTS consumer's finish() runs on the outer loop thread after the executor
         # returns, so early run_sync returns are also finalised.

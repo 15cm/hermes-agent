@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from contextlib import suppress
+from contextvars import ContextVar, Token
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -72,6 +73,7 @@ def _skills_dir() -> Path:
 
 
 _secret_capture_callback = None
+_secret_capture_callback_ctx: ContextVar[Any] = ContextVar("_secret_capture_callback_ctx", default=None)
 _LOOKUP_HINT = "Use a skill name or relative path within the skills directory."
 
 
@@ -100,6 +102,21 @@ def load_env() -> Dict[str, str]:
 def set_secret_capture_callback(callback) -> None:
     global _secret_capture_callback
     _secret_capture_callback = callback
+
+
+def bind_secret_capture_callback(callback) -> Token:
+    """Bind callback to current turn context; never changes another turn's callback."""
+    return _secret_capture_callback_ctx.set(callback)
+
+
+def reset_secret_capture_callback(token: Token) -> None:
+    _secret_capture_callback_ctx.reset(token)
+
+
+def get_secret_capture_callback():
+    """Return turn-local callback, falling back to CLI/TUI compatibility state."""
+    callback = _secret_capture_callback_ctx.get()
+    return callback if callback is not None else _secret_capture_callback
 
 
 def _skill_utils_delegate(attr: str):
