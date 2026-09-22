@@ -774,6 +774,13 @@ class TestPromptBuilderConstants:
             assert "do not use markdown" not in hint.lower()
             assert "markdown" in hint.lower()
 
+    def test_matrix_hint_teaches_secure_chat_credential_capture(self):
+        hint = PLATFORM_HINTS["matrix"]
+        assert "secure gateway credential-capture flow" in hint
+        assert "tools.credential_files" in hint
+        assert "does not read raw chat secrets" in hint
+        assert "do not repeat, log, or expose" in hint
+
     def test_cli_hint_does_not_suggest_media_tags(self):
         # Regression: MEDIA:/path tags are intercepted only by messaging
         # gateway platforms. On the CLI they render as literal text and
