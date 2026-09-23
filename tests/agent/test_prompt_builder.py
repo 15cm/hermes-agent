@@ -779,6 +779,9 @@ class TestPromptBuilderConstants:
         assert "store_matrix_credential" in hint
         assert "ordinary chat data" in hint
         assert "Never claim secure capture" in hint
+        assert "if either is missing, ask" in hint
+        assert "Do not require credential rotation" in hint
+        assert "browser vault tools" in hint
 
 
     def test_cli_hint_does_not_suggest_media_tags(self):
