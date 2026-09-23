@@ -25,6 +25,7 @@ def _minimal_terminal_config(cwd="/tmp"):
 
 
 def _patch_common(monkeypatch, env):
+    monkeypatch.setattr(redact, "_REDACT_ENABLED", True)
     monkeypatch.setattr(terminal_tool, "_active_environments", {"default": env})
     monkeypatch.setattr(terminal_tool, "_last_activity", {"default": 0})
     monkeypatch.setattr(terminal_tool, "_task_env_overrides", {})
@@ -74,6 +75,21 @@ def test_successful_output_preserves_redaction_opt_out(monkeypatch):
 
     assert result["exit_code"] == 0
     assert result["output"] == SECRET
+
+
+def test_error_preserves_redaction_opt_out(monkeypatch):
+    class FailingEnv:
+        env = {}
+
+        def execute(self, command, **kwargs):
+            raise RuntimeError(f"backend failed with {SECRET}")
+
+    _patch_common(monkeypatch, FailingEnv())
+    monkeypatch.setattr(redact, "_REDACT_ENABLED", False)
+    monkeypatch.setattr(terminal_tool.time, "sleep", lambda seconds: None)
+
+    result = json.loads(terminal_tool.terminal_tool(command="echo ok"))
+    assert SECRET in result["error"]
 
 
 def test_successful_output_keeps_command_aware_redactor(monkeypatch):

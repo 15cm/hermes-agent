@@ -154,8 +154,8 @@ def _prepare_smart_approval_observer(
     try:
         from agent.redact import redact_sensitive_text
 
-        hook_command = redact_sensitive_text(command, force=True)
-        hook_description = redact_sensitive_text(description, force=True)
+        hook_command = redact_sensitive_text(command)
+        hook_description = redact_sensitive_text(description)
     except Exception as exc:
         logger.debug("Smart approval hook redaction failed: %s", exc)
         return
@@ -3755,8 +3755,8 @@ def _present_with_selected_transport(
 
         timeout_seconds = _get_approval_timeout()
         request = ApprovalRequest.create(
-            command=redact_sensitive_text(command, force=True),
-            description=redact_sensitive_text(description, force=True),
+            command=redact_sensitive_text(command),
+            description=redact_sensitive_text(description),
             pattern_key=pattern_key,
             pattern_keys=tuple(pattern_keys),
             session_key=session_key,

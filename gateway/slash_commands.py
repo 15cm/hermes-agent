@@ -4321,7 +4321,7 @@ class GatewaySlashCommandsMixin:
                 # even when global redaction is disabled.
                 if _summary_err:
                     from agent.redact import redact_sensitive_text
-                    _summary_err = redact_sensitive_text(_summary_err, force=True)
+                    _summary_err = redact_sensitive_text(_summary_err)
                 # Separately: did the user's CONFIGURED aux model fail
                 # and we recovered via main?  Surface that as an info
                 # note so they can fix their config.

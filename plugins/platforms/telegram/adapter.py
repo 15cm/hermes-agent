@@ -33,7 +33,7 @@ def _redact_telegram_error_text(error: object) -> str:
     try:
         from agent.redact import redact_sensitive_text
 
-        return redact_sensitive_text(text, force=True)
+        return redact_sensitive_text(text)
     except Exception:
         return "<telegram error redacted>"
 

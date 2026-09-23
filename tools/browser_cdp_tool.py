@@ -47,7 +47,7 @@ def _redact_cdp_output(value: Any) -> Any:
     from agent.redact import redact_sensitive_text
 
     if isinstance(value, str):
-        return redact_sensitive_text(value, force=True)
+        return redact_sensitive_text(value)
     if isinstance(value, list):
         return [_redact_cdp_output(item) for item in value]
     if isinstance(value, tuple):

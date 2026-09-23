@@ -1913,7 +1913,7 @@ def dump_api_request_debug(
         # JSON writer so request dumps keep the same write semantics as before.
         from agent.redact import redact_sensitive_text
         _serialized = json.dumps(dump_payload, ensure_ascii=False, indent=2, default=str)
-        _redacted_payload = json.loads(redact_sensitive_text(_serialized, force=True))
+        _redacted_payload = json.loads(redact_sensitive_text(_serialized))
         atomic_json_write(dump_file, _redacted_payload, default=str)
 
         agent._vprint(f"{agent.log_prefix}🧾 Request debug dump written to: {dump_file}")

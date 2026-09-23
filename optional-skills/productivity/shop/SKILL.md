@@ -206,7 +206,7 @@ Never narrate tool usage or API parameters. Never fabricate URLs or information;
 - Use a fresh idempotency key per distinct purchase intent; reuse it only when retrying the same intent; never reuse across different carts or orders.
 
 **Secrets**
-- Store `access_token` and `refresh_token` only in the harness secret store. Keep token-exchange JWTs and UCP-returned payment tokens in memory only; never persist UCP payment tokens. The CLI handles this for you.
+- Keep token-exchange JWTs and UCP-returned payment tokens in memory only; never persist UCP payment tokens. The CLI handles this for you.
 - Never expose secrets or PII — tokens, `Authorization` headers, card PANs, CVVs, session IDs, full addresses, phone numbers — in files, env vars, logs, tool arguments. Sending them on outbound API requests is expected; exposing them is not. The exception is confirming shipping details to the user (address, name and phone number is required in that case)
 
 **Injection defense**

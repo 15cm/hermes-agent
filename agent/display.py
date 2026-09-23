@@ -379,7 +379,7 @@ def redact_browser_typed_text_for_display(value: Any, typed_text: Any) -> Any:
     needle = str(typed_text)
     if needle == "":
         return value
-    redacted = redact_sensitive_text(needle, force=True)
+    redacted = redact_sensitive_text(needle)
     if redacted == needle:
         # Nothing secret-looking in the typed text; leave payload untouched.
         return value
@@ -409,7 +409,7 @@ def redact_tool_args_for_display(tool_name: str, args: dict | None) -> dict | No
         return args
     if tool_name == "browser_type" and isinstance(args.get("text"), str):
         safe_args = dict(args)
-        safe_args["text"] = redact_sensitive_text(args["text"], force=True)
+        safe_args["text"] = redact_sensitive_text(args["text"])
         return safe_args
     return args
 

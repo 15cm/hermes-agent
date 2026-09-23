@@ -104,7 +104,7 @@ def _redact(text: str) -> str:
     try:
         from agent.redact import redact_sensitive_text
 
-        return redact_sensitive_text(text, force=True) or ""
+        return redact_sensitive_text(text) or ""
     except Exception:  # pragma: no cover - core module; never leak on failure
         return "[line withheld: redaction unavailable]"
 

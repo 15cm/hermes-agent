@@ -462,7 +462,7 @@ class CodexAppServerSession:
         joined = "\n".join(line.rstrip() for line in tail if line)
         if not joined.strip():
             return base
-        redacted = redact_sensitive_text(joined, force=True)
+        redacted = redact_sensitive_text(joined)
         return f"{base}\ncodex stderr (last {len(tail)} lines):\n{redacted}"
 
     # ---------- per-turn ----------

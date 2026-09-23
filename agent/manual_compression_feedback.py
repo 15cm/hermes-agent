@@ -104,10 +104,8 @@ def summarize_manual_compression(
         )
 
     if failure_reason and (aborted or fallback_used):
-        # This text crosses a user-facing UI boundary.  Never let a disabled
-        # global redaction preference expose credentials embedded in provider
-        # exception text.
-        safe_reason = redact_sensitive_text(failure_reason.strip(), force=True)
+        # Respect the configured redaction preference for user-facing errors.
+        safe_reason = redact_sensitive_text(failure_reason.strip())
         note = f"{note} Reason: {safe_reason}"
 
     return {

@@ -230,7 +230,7 @@ def redact_session_data(session: dict[str, Any]) -> dict[str, Any]:
 
     def _clean(value: Any) -> Any:
         if isinstance(value, str):
-            return redact_sensitive_text(value, force=True)
+            return redact_sensitive_text(value)
         if isinstance(value, list):
             return [_clean(v) for v in value]
         if isinstance(value, dict):

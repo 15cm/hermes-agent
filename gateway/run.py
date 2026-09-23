@@ -591,15 +591,17 @@ def _redact_gateway_user_facing_secrets(text: str) -> str:
     same Tirith-grade redactor already applied to logs, tool output, and
     approval-command prompts — so the outbound chat path masks the full
     credential set the startup banner promises ("chat responses are scrubbed
-    before delivery"), not a divergent subset. ``force=True`` honors redaction
-    even when ``security.redact_secrets`` is off, matching the
-    ``_redact_approval_command`` reasoning (#23810).
+    before delivery"), not a divergent subset. Redaction is skipped when
+    ``security.redact_secrets`` is off.
 
     The narrow ``_GATEWAY_SECRET_PATTERNS`` set runs as a belt-and-suspenders
     second pass so nothing the gateway historically caught can regress, and so
     redaction still degrades gracefully if the import ever fails.
     """
     redacted = str(text or "")
+    from agent.redact import _REDACT_ENABLED
+    if not _REDACT_ENABLED:
+        return redacted
     try:
         from agent.redact import redact_sensitive_text
 
@@ -619,14 +621,13 @@ def _redact_approval_command(cmd: "str | None") -> str:
     Tirith's *findings* are already redacted, but the gateway approval prompt
     is built from the raw command string, so a credential-shaped value Tirith
     flagged would otherwise be echoed verbatim to the chat platform (#48456).
-    Uses ``redact_sensitive_text(force=True)`` — the same Tirith-grade redactor
-    — so the prompt honors redaction even when ``security.redact_secrets`` is
-    off. Module-level so the wiring is unit-testable (the call site is a deeply
+    Uses ``redact_sensitive_text`` and respects the configured preference.
+    Module-level so the wiring is unit-testable (the call site is a deeply
     nested gateway closure that cannot be driven directly).
     """
     from agent.redact import redact_sensitive_text
 
-    return redact_sensitive_text(str(cmd or ""), force=True)
+    return redact_sensitive_text(str(cmd or ""))
 
 
 def _format_exec_approval_fallback(
@@ -11508,13 +11509,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             )
         except Exception:
             pass
-        # Redaction status: ON by default (#17691). Surface a prominent
-        # warning if an operator has explicitly opted out so they don't
-        # forget the downgrade is active — the redactor snapshots its
+        # Redaction status: OFF by default. The redactor snapshots its
         # state at import time, so this log line is the source of truth
         # for this process's lifetime.
         try:
-            _redact_raw = os.getenv("HERMES_REDACT_SECRETS", "true")
+            _redact_raw = os.getenv("HERMES_REDACT_SECRETS", "false")
             _redact_on = _redact_raw.lower() in {"1", "true", "yes", "on"}
             if _redact_on:
                 logger.info(
@@ -18708,7 +18707,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                         # may contain credentials; this message
                                         # reaches gateway users directly.
                                         from agent.redact import redact_sensitive_text
-                                        _err = redact_sensitive_text(_err, force=True)
+                                        _err = redact_sensitive_text(_err)
                                         _warn_msg = (
                                             "⚠️ Context compression aborted "
                                             f"({_err}). No messages were dropped — "

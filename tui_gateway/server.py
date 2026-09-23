@@ -5431,7 +5431,7 @@ def _redact_tui_verbose_text(text: str) -> str:
     try:
         from agent.redact import redact_sensitive_text
 
-        redacted = redact_sensitive_text(str(text), force=True)
+        redacted = redact_sensitive_text(str(text))
     except Exception:
         return ""
     return _cap_tui_verbose_text(redacted)

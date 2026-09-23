@@ -7,12 +7,14 @@ to the browser backend regardless.
 """
 
 import json
+import agent.redact as redact
 from unittest.mock import patch
 
 from tools.browser_tool import browser_type
 
 
 def test_browser_type_redacts_api_key_in_output(monkeypatch):
+    monkeypatch.setattr(redact, "_REDACT_ENABLED", True)
     monkeypatch.delenv("CAMOFOX_URL", raising=False)
     monkeypatch.delenv("BROWSER_CDP_URL", raising=False)
     monkeypatch.setenv("HERMES_REDACT_SECRETS", "true")
@@ -51,6 +53,7 @@ def test_browser_type_keeps_normal_text_in_output(monkeypatch):
 
 
 def test_browser_type_failure_redacts_api_key_in_error(monkeypatch):
+    monkeypatch.setattr(redact, "_REDACT_ENABLED", True)
     monkeypatch.delenv("CAMOFOX_URL", raising=False)
     monkeypatch.delenv("BROWSER_CDP_URL", raising=False)
     monkeypatch.setenv("HERMES_REDACT_SECRETS", "true")

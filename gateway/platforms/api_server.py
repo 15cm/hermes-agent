@@ -1082,7 +1082,7 @@ def _resolve_media_to_data_urls(text: str) -> str:
 
 def _redact_api_error_text(value: Any, *, limit: int | None = None) -> str:
     """Redact API-bound error text before it crosses the HTTP boundary."""
-    redacted = redact_sensitive_text(str(value), force=True)
+    redacted = redact_sensitive_text(str(value))
     if limit is not None:
         return redacted[:limit]
     return redacted
@@ -6516,7 +6516,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 }
                 if preview is not None:
                     event["preview"] = redact_sensitive_text(
-                        str(preview), force=True
+                        str(preview)
                     )
                 for key in (
                     "goal",
@@ -6549,7 +6549,7 @@ class APIServerAdapter(BasePlatformAdapter):
                     if key in ("goal", "summary", "output_tail") and isinstance(
                         value, str
                     ):
-                        value = redact_sensitive_text(value, force=True)
+                        value = redact_sensitive_text(value)
                     event[key] = value
                 _push(event)
             # _thinking, subagent.tool, and subagent_progress are intentionally

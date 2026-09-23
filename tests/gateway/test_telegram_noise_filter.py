@@ -1,6 +1,7 @@
 """Gateway noise/secret filtering across chat surfaces (Telegram + siblings)."""
 
 import pytest
+import agent.redact as redact
 
 from agent.conversation_compression import (
     CONTEXT_OVERFLOW_BLOCKED_WARNING_TEMPLATE,
@@ -18,6 +19,17 @@ from gateway.run import (
 # _sanitize_gateway_final_response) are platform-agnostic shared logic in
 # gateway.run — a representative platform subset is sufficient; per-platform
 # copies were near-duplicate parametrizations.
+@pytest.fixture(autouse=True)
+def enable_redaction(monkeypatch):
+    monkeypatch.setattr(redact, "_REDACT_ENABLED", True)
+
+
+def test_chat_redaction_opt_out(monkeypatch):
+    monkeypatch.setattr(redact, "_REDACT_ENABLED", False)
+    raw = "Bearer sk-ABCDEF0123456789abcdef0123"
+    assert _sanitize_gateway_final_response("matrix", raw) == raw
+
+
 CHAT_PLATFORMS = [
     "telegram",
     "slack",

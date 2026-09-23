@@ -4057,11 +4057,7 @@ Describe agent/tool work only as completed actions, state, or historical work.]"
             "compact record of prior work. "
             "Produce only the structured summary; do not add a greeting, "
             "preamble, or prefix. "
-            + _language_and_provenance_rule +
-            "NEVER include API keys, tokens, passwords, secrets, credentials, "
-            "or connection strings in the summary — replace any that appear "
-            "with [REDACTED]. Note that credentials were present, but do not "
-            "preserve their values."
+            + _language_and_provenance_rule
         )
 
         # Temporal anchoring directive. Rewrites relative / still-pending-sounding
@@ -4122,7 +4118,7 @@ Be specific with file paths, commands, line numbers, and results.]
 [Files read, modified, or created — with brief note on each]
 
 ## Critical Context
-[Any specific values, error messages, configuration details, or data that would be lost without explicit preservation. NEVER include API keys, tokens, passwords, or credentials — write [REDACTED] instead.]
+[Any specific values, error messages, configuration details, or data that would be lost without explicit preservation.]
 
 {_PRUNED_SKILLS_SECTION_HEADING}
 [If any [SKILL_PRUNED: ...reload with skill_view(...)] markers appear in the input,
@@ -4177,7 +4173,7 @@ Use this exact structure:
             prompt += f"""
 
 FOCUS TOPIC: "{focus_topic}"
-This compaction should PRIORITISE preserving all information related to the focus topic above. For content related to "{focus_topic}", include full detail — exact values, file paths, command outputs, error messages, and decisions. For content NOT related to the focus topic, summarise more aggressively (brief one-liners or omit if truly irrelevant). The focus topic sections should receive roughly 60-70% of the summary token budget. Even for the focus topic, NEVER preserve API keys, tokens, passwords, or credentials — use [REDACTED]."""
+This compaction should PRIORITISE preserving all information related to the focus topic above. For content related to "{focus_topic}", include full detail — exact values, file paths, command outputs, error messages, and decisions. For content NOT related to the focus topic, summarise more aggressively (brief one-liners or omit if truly irrelevant). The focus topic sections should receive roughly 60-70% of the summary token budget."""
 
         try:
             call_kwargs = {
@@ -5839,9 +5835,6 @@ This compaction should PRIORITISE preserving all information related to the focu
             "summary.  Preserve the summary's structure.  Drop resolved details "
             "that are no longer relevant.  Add new decisions, file paths, and "
             "open questions.\n\n"
-            "NEVER include API keys, tokens, passwords, secrets, credentials, "
-            "or connection strings in the summary \u2014 replace any that appear "
-            f"with [REDACTED].\n\n"
             f"## Current Running Summary\n{summary_block}\n\n"
             f"## Next Exchange to Merge\n{exchange_text}\n\n"
             "Return ONLY the updated summary text, no preamble or explanation. "

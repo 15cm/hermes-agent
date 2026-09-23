@@ -3122,7 +3122,7 @@ def _store_full_snapshot(snapshot_text: str) -> Optional[str]:
         from hermes_constants import get_hermes_dir
         from agent.redact import redact_sensitive_text
 
-        content = redact_sensitive_text(snapshot_text, force=True)
+        content = redact_sensitive_text(snapshot_text)
         if len(content) > MAX_STORED_SNAPSHOT_CHARS:
             content = (
                 content[:MAX_STORED_SNAPSHOT_CHARS]
@@ -3263,7 +3263,7 @@ def _redact_browser_output(value: Any) -> Any:
     from agent.redact import redact_sensitive_text
 
     if isinstance(value, str):
-        return redact_sensitive_text(value, force=True)
+        return redact_sensitive_text(value)
     if isinstance(value, list):
         return [_redact_browser_output(item) for item in value]
     if isinstance(value, tuple):

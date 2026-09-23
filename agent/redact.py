@@ -67,14 +67,11 @@ _SENSITIVE_BODY_KEYS = frozenset({
 
 # Snapshot at import time so runtime env mutations (e.g. LLM-generated
 # `export HERMES_REDACT_SECRETS=false`) cannot disable redaction
-# mid-session.  ON by default — secure default per issue #17691. Users who
-# need raw credential values in tool output (e.g. working on the redactor
-# itself) can opt out via `security.redact_secrets: false` in config.yaml
+# mid-session. OFF by default; operators can enable masking with
+# `security.redact_secrets: true` in config.yaml
 # (bridged to this env var in hermes_cli/main.py, gateway/run.py, and
-# cli.py) or `HERMES_REDACT_SECRETS=false` in ~/.hermes/.env. An opt-out
-# warning is logged at gateway and CLI startup so operators see the
-# downgrade — see `_log_redaction_status()` in gateway/run.py and cli.py.
-_REDACT_ENABLED = os.getenv("HERMES_REDACT_SECRETS", "true").lower() in {"1", "true", "yes", "on"}
+# cli.py) or `HERMES_REDACT_SECRETS=true` in ~/.hermes/.env.
+_REDACT_ENABLED = os.getenv("HERMES_REDACT_SECRETS", "false").lower() in {"1", "true", "yes", "on"}
 
 # Known API key prefixes -- match the prefix + contiguous token chars
 _PREFIX_PATTERNS = [
@@ -782,7 +779,7 @@ def redact_sensitive_text(
     """Apply all redaction patterns to a block of text.
 
     Safe to call on any string -- non-matching text passes through unchanged.
-    Enabled by default. Disable via security.redact_secrets: false in config.yaml.
+    Disabled by default. Enable via security.redact_secrets: true in config.yaml.
     Set force=True for safety boundaries that must never return raw secrets
     regardless of the user's global logging redaction preference.
 
