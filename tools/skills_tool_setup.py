@@ -89,23 +89,15 @@ def _capture_result(missing_names, setup_skipped=False, gateway_setup_hint=None,
 
 def _capture_required_environment_variables(
     skill_name: str, missing_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Use secure callback on interactive surfaces; Matrix uses ordinary chat."""
+    """Use secure callback on interactive surfaces; messaging has no capture path."""
     if not missing_entries:
         return _capture_result([])
     missing_names = [entry["name"] for entry in missing_entries]
     from tools import skills_tool as _st
     callback = _st.get_secret_capture_callback()
     if callback is None or _is_gateway_surface():
-        return _capture_result(
-            missing_names,
-            setup_skipped=False,
-            gateway_setup_hint=(
-                "Send the value in ordinary Matrix chat when asked; it may appear in Matrix history, "
-                "Hermes logs, session history, model context, and other configured records."
-            ) if _is_gateway_surface() and _get_gateway_platform() == "matrix" else None,
-            capture_supported=False,
-            capture_outcome="ordinary_chat" if _is_gateway_surface() and _get_gateway_platform() == "matrix" else "unavailable",
-        )
+        return _capture_result(missing_names, capture_supported=False,
+                               capture_outcome="unavailable")
     remaining_names: List[str] = []
     for entry in missing_entries:
         metadata = {"skill_name": skill_name, **{k: entry[k] for k in ("help", "required_for") if entry.get(k)}}
@@ -127,11 +119,6 @@ def _is_gateway_surface() -> bool:
         return True
     from gateway.session_context import get_session_env
     return bool(get_session_env("HERMES_SESSION_PLATFORM"))
-
-
-def _get_gateway_platform() -> str:
-    from gateway.session_context import get_session_env
-    return str(get_session_env("HERMES_SESSION_PLATFORM", "") or "").strip().lower()
 
 
 def _is_env_var_persisted(var_name: str, env_snapshot: Dict[str, str]) -> bool:

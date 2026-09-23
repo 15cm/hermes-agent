@@ -76,6 +76,12 @@ class TestGetToolset:
 
 
 class TestResolveToolset:
+    def test_matrix_has_normal_file_tools_without_special_storage(self):
+        tools = resolve_toolset("hermes-matrix")
+        assert "write_file" in tools
+        assert "terminal" in tools
+        assert "store_matrix_credential" not in tools
+
     def test_leaf_toolset(self):
         tools = resolve_toolset("web")
         assert set(tools) == {"web_search", "web_extract"}

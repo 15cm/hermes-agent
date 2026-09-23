@@ -774,14 +774,10 @@ class TestPromptBuilderConstants:
             assert "do not use markdown" not in hint.lower()
             assert "markdown" in hint.lower()
 
-    def test_matrix_hint_teaches_plaintext_credential_storage(self):
+    def test_matrix_hint_has_no_special_credential_storage_flow(self):
         hint = PLATFORM_HINTS["matrix"]
-        assert "store_matrix_credential" in hint
-        assert "ordinary chat data" in hint
-        assert "Never claim secure capture" in hint
-        assert "if either is missing, ask" in hint
-        assert "Do not require credential rotation" in hint
-        assert "browser vault tools" in hint
+        assert "store_matrix_credential" not in hint
+        assert "request_secret_capture" not in hint
 
 
     def test_cli_hint_does_not_suggest_media_tags(self):
