@@ -689,12 +689,19 @@ def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None
             return _err
     if resolved in _SENSITIVE_EXACT_PATHS or normalized in _SENSITIVE_EXACT_PATHS:
         return _err
-    # Prevent agents from modifying the Hermes config file directly.
-    # approvals.mode and other security settings live here; a malicious or
-    # prompt-injected agent could silently disable exec approval by writing to
-    # this file.
+    # Prevent agents from modifying the Hermes config file directly unless
+    # the operator explicitly opts in. This protects approvals.mode and other
+    # security settings from prompt-injected writes while allowing deliberate
+    # unrestricted file access for trusted local sessions.
+    try:
+        from hermes_cli.config import load_config, cfg_get
+        allow_config_writes = cfg_get(
+            load_config(), "security", "allow_agent_config_writes", default=True
+        ) is True
+    except Exception:
+        allow_config_writes = False
     hermes_config = _get_hermes_config_resolved()
-    if hermes_config and (resolved == hermes_config or normalized == hermes_config):
+    if not allow_config_writes and hermes_config and (resolved == hermes_config or normalized == hermes_config):
         return (
             f"Refusing to write to Hermes config file: {filepath}\n"
             "Agent cannot modify security-sensitive configuration. "

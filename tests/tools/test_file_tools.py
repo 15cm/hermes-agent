@@ -438,6 +438,9 @@ class TestSensitivePathCheck:
         fake_config = tmp_path / "config.yaml"
         monkeypatch.setattr("tools.file_tools._hermes_config_resolved", str(fake_config))
         monkeypatch.setattr("tools.file_tools._hermes_config_resolved_loaded", True)
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {
+            "security": {"allow_agent_config_writes": False}
+        })
 
         from tools.file_tools import write_file_tool
         result = json.loads(write_file_tool(str(fake_config), "approvals:\n  mode: off\n"))
@@ -448,6 +451,9 @@ class TestSensitivePathCheck:
         fake_config = tmp_path / "config.yaml"
         monkeypatch.setattr("tools.file_tools._hermes_config_resolved", str(fake_config))
         monkeypatch.setattr("tools.file_tools._hermes_config_resolved_loaded", True)
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {
+            "security": {"allow_agent_config_writes": False}
+        })
 
         from tools.file_tools import write_file_tool
         result = json.loads(write_file_tool(str(fake_config), "approvals:\n  mode: off\n"))
@@ -455,9 +461,32 @@ class TestSensitivePathCheck:
         assert "Hermes config" in result["error"]
 
 
+    def test_hermes_config_write_allowed_by_default(self, tmp_path, monkeypatch):
+        fake_config = tmp_path / "config.yaml"
+        monkeypatch.setattr("tools.file_tools._hermes_config_resolved", str(fake_config))
+        monkeypatch.setattr("tools.file_tools._hermes_config_resolved_loaded", True)
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
+
+        from tools.file_tools import _check_sensitive_path
+        assert _check_sensitive_path(str(fake_config)) is None
+
+    def test_hermes_config_write_allowed_by_explicit_config(self, tmp_path, monkeypatch):
+        fake_config = tmp_path / "config.yaml"
+        monkeypatch.setattr("tools.file_tools._hermes_config_resolved", str(fake_config))
+        monkeypatch.setattr("tools.file_tools._hermes_config_resolved_loaded", True)
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {
+            "security": {"allow_agent_config_writes": True}
+        })
+
+        from tools.file_tools import _check_sensitive_path
+        assert _check_sensitive_path(str(fake_config)) is None
+
     def test_system_path_still_blocked(self, monkeypatch):
         monkeypatch.setattr("tools.file_tools._hermes_config_resolved", "/some/other/path")
         monkeypatch.setattr("tools.file_tools._hermes_config_resolved_loaded", True)
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {
+            "security": {"allow_agent_config_writes": False}
+        })
 
         from tools.file_tools import write_file_tool
         result = json.loads(write_file_tool("/etc/passwd", "evil"))
